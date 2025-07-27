@@ -18,13 +18,20 @@ func main() {
 
 	var dirs []dirInfo
 
-	targetDir := flag.String("t", "", "target directory")
+	sortDesc := flag.Bool("s", false, "sort by size descending")
 	flag.Parse()
 
-	fmt.Printf("Calculating disk usage for: %s\n", *targetDir)
+	// Get optional positional argument as directory (defaults to ".")
+	args := flag.Args()
+	targetDir := "."
+	if len(args) > 0 {
+		targetDir = args[0]
+	}
+
+	fmt.Printf("Calculating disk usage for: %s\n", targetDir)
 
 	// Get immediate subdirectories and their sizes
-	entries, err := os.ReadDir(*targetDir)
+	entries, err := os.ReadDir(targetDir)
 	if err != nil {
 		fmt.Printf("Error reading directory: %v\n", err)
 		return
@@ -32,7 +39,7 @@ func main() {
 
 	for _, entry := range entries {
 		if entry.IsDir() {
-			dirPath := filepath.Join(*targetDir, entry.Name())
+			dirPath := filepath.Join(targetDir, entry.Name())
 			size, err := parser.DirSize(dirPath)
 			if err != nil {
 				fmt.Printf("Error calculating size for %s: %v\n", dirPath, err)
@@ -42,9 +49,12 @@ func main() {
 		}
 	}
 
-	// Sort by size descending (largest first)
+	// Sort ascending or descending
 	sort.Slice(dirs, func(i, j int) bool {
-		return dirs[i].Size > dirs[j].Size
+		if *sortDesc {
+			return dirs[i].Size > dirs[j].Size
+		}
+		return dirs[i].Size < dirs[j].Size
 	})
 
 	// Print sorted results
@@ -53,10 +63,10 @@ func main() {
 	}
 
 	// Optionally, get the total size of the target directory itself
-	totalTargetSize, err := parser.DirSize(*targetDir)
+	totalTargetSize, err := parser.DirSize(targetDir)
 	if err != nil {
-		fmt.Printf("Error calculating total size for %s: %v\n", *targetDir, err)
+		fmt.Printf("Error calculating total size for %s: %v\n", targetDir, err)
 	} else {
-		fmt.Printf("\nTotal size of %s: %s\n", *targetDir, parser.FormatBytes(totalTargetSize))
+		fmt.Printf("\n%-20s Total size of: %s\n", parser.FormatBytes(totalTargetSize), targetDir)
 	}
 }
