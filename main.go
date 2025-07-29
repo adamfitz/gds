@@ -10,7 +10,6 @@ import (
 )
 
 func main() {
-
 	type dirInfo struct {
 		Name string
 		Size int64
@@ -18,13 +17,40 @@ func main() {
 
 	var dirs []dirInfo
 
-	sortDesc := flag.Bool("s", false, "sort by size descending")
+	// Define flags
+	sortDescending := flag.Bool("d", false, "sort by size descending")
+	sortAscending := flag.Bool("a", false, "sort by size ascending")
+
+	// Expand grouped flags like -ad into -a -d
+	var expandedArgs []string
+	for _, arg := range os.Args {
+		if len(arg) > 2 && arg[0] == '-' && arg[1] != '-' {
+			// e.g., -ad becomes -a -d
+			for _, ch := range arg[1:] {
+				expandedArgs = append(expandedArgs, "-"+string(ch))
+			}
+		} else {
+			expandedArgs = append(expandedArgs, arg)
+		}
+	}
+	os.Args = expandedArgs
+
 	flag.Parse()
 
-	// Get optional positional argument as directory (defaults to ".")
+	// Ensure only one sort flag is used
+	if *sortDescending && *sortAscending {
+		fmt.Fprintln(os.Stderr, "Error: cannot use both -a (ascending) and -d (descending) at the same time.")
+		os.Exit(1)
+	}
+
+	// Check number of positional args (target directory)
 	args := flag.Args()
+	if len(args) > 1 {
+		fmt.Fprintln(os.Stderr, "Error: only one target directory may be specified.")
+		os.Exit(1)
+	}
 	targetDir := "."
-	if len(args) > 0 {
+	if len(args) == 1 {
 		targetDir = args[0]
 	}
 
@@ -40,7 +66,7 @@ func main() {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			dirPath := filepath.Join(targetDir, entry.Name())
-			size, err := parser.DirSize(dirPath)
+			size, err := parser.WalkDirSize(dirPath)
 			if err != nil {
 				fmt.Printf("Error calculating size for %s: %v\n", dirPath, err)
 				continue
@@ -49,21 +75,25 @@ func main() {
 		}
 	}
 
-	// Sort ascending or descending
-	sort.Slice(dirs, func(i, j int) bool {
-		if *sortDesc {
+	// Apply sorting
+	if *sortDescending {
+		sort.Slice(dirs, func(i, j int) bool {
 			return dirs[i].Size > dirs[j].Size
-		}
-		return dirs[i].Size < dirs[j].Size
-	})
+		})
+	} else {
+		// default and -a
+		sort.Slice(dirs, func(i, j int) bool {
+			return dirs[i].Size < dirs[j].Size
+		})
+	}
 
 	// Print sorted results
 	for _, d := range dirs {
 		fmt.Printf("%-20s %s\n", parser.FormatBytes(d.Size), d.Name)
 	}
 
-	// Optionally, get the total size of the target directory itself
-	totalTargetSize, err := parser.DirSize(targetDir)
+	// Print total size of target dir
+	totalTargetSize, err := parser.WalkDirSize(targetDir)
 	if err != nil {
 		fmt.Printf("Error calculating total size for %s: %v\n", targetDir, err)
 	} else {

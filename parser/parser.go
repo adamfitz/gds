@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -38,5 +39,25 @@ func DirSize(path string) (int64, error) {
 		}
 		return nil
 	})
+	return totalSize, err
+}
+
+func WalkDirSize(path string) (int64, error) {
+	var totalSize int64
+
+	err := filepath.WalkDir(path, func(filePath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			totalSize += info.Size()
+		}
+		return nil
+	})
+
 	return totalSize, err
 }
