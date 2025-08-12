@@ -1,102 +1,110 @@
 package main
 
 import (
-	"flag"
 	"fmt"
-	"gds/parser"
+	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
+
+	"gdu/parser"
 )
 
-func main() {
-	type dirInfo struct {
-		Name string
-		Size int64
-	}
+// DirSize represents a directory and its calculated size.
+type DirSize struct {
+	Path string
+	Size int64 // in bytes
+}
 
-	var dirs []dirInfo
-
-	// Define flags
-	sortDescending := flag.Bool("d", false, "sort by size descending")
-	sortAscending := flag.Bool("a", false, "sort by size ascending")
-
-	// Expand grouped flags like -ad into -a -d
-	var expandedArgs []string
-	for _, arg := range os.Args {
-		if len(arg) > 2 && arg[0] == '-' && arg[1] != '-' {
-			// e.g., -ad becomes -a -d
-			for _, ch := range arg[1:] {
-				expandedArgs = append(expandedArgs, "-"+string(ch))
-			}
-		} else {
-			expandedArgs = append(expandedArgs, arg)
+/*
+// calculateDirSize recursively calculates the size of a directory and its contents.
+func calculateDirSize(path string) (int64, error) {
+	var totalSize int64
+	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			totalSize += info.Size()
+		}
+		return nil
+	})
+	return totalSize, err
+}
+
+// formatBytes converts bytes to a human-readable format.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
 	}
-	os.Args = expandedArgs
-
-	flag.Parse()
-
-	// Ensure only one sort flag is used
-	if *sortDescending && *sortAscending {
-		fmt.Fprintln(os.Stderr, "Error: cannot use both -a (ascending) and -d (descending) at the same time.")
-		os.Exit(1)
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
 	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+*/
 
-	// Check number of positional args (target directory)
-	args := flag.Args()
-	if len(args) > 1 {
-		fmt.Fprintln(os.Stderr, "Error: only one target directory may be specified.")
-		os.Exit(1)
-	}
-	targetDir := "."
-	if len(args) == 1 {
-		targetDir = args[0]
-	}
-
-	fmt.Printf("Calculating disk usage for: %s\n", targetDir)
-
-	// Get immediate subdirectories and their sizes
-	entries, err := os.ReadDir(targetDir)
-	if err != nil {
-		fmt.Printf("Error reading directory: %v\n", err)
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: go run main.go <directory_path>")
 		return
 	}
+	rootPath := os.Args[1]
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			dirPath := filepath.Join(targetDir, entry.Name())
-			size, err := parser.WalkDirSize(dirPath)
-			if err != nil {
-				fmt.Printf("Error calculating size for %s: %v\n", dirPath, err)
-				continue
-			}
-			dirs = append(dirs, dirInfo{Name: entry.Name(), Size: size})
+	var dirSizes []DirSize
+
+	fmt.Println("Calculating disk usage for: ", os.Args[1])
+
+	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			log.Printf("Error accessing %s: %v", path, err)
+			return nil // Continue walking even if an error occurs for one entry
 		}
-	}
+		if d.IsDir() {
+			size, err := parser.DirSize(path)
+			if err != nil {
+				log.Printf("Error calculating size for %s: %v", path, err)
+				return nil
+			}
+			dirSizes = append(dirSizes, DirSize{Path: path, Size: size})
+		}
+		return nil
+	})
 
-	// Apply sorting
-	if *sortDescending {
-		sort.Slice(dirs, func(i, j int) bool {
-			return dirs[i].Size > dirs[j].Size
-		})
-	} else {
-		// default and -a
-		sort.Slice(dirs, func(i, j int) bool {
-			return dirs[i].Size < dirs[j].Size
-		})
-	}
-
-	// Print sorted results
-	for _, d := range dirs {
-		fmt.Printf("%-20s %s\n", parser.FormatBytes(d.Size), d.Name)
-	}
-
-	// Print total size of target dir
-	totalTargetSize, err := parser.WalkDirSize(targetDir)
 	if err != nil {
-		fmt.Printf("Error calculating total size for %s: %v\n", targetDir, err)
-	} else {
-		fmt.Printf("\n%-20s Total size of: %s\n", parser.FormatBytes(totalTargetSize), targetDir)
+		log.Fatalf("Error walking directory: %v", err)
+	}
+
+	// Sort directories by size in ascending order
+	sort.Slice(dirSizes, func(i, j int) bool {
+		return dirSizes[i].Size < dirSizes[j].Size
+	})
+
+	// Print in tree-like format
+	fmt.Printf("Disk usage for %s (sorted by size):\n", rootPath)
+
+
+	for idx, ds := range dirSizes {
+		relPath, err := filepath.Rel(rootPath, ds.Path)
+		if err != nil {
+			relPath = ds.Path // Fallback if relative path calculation fails
+		}
+		if relPath == "." { // Root directory itself
+			relPath = rootPath
+		}
+		// if its the last element then add a carriage return before printing
+		if idx == len(dirSizes) -1 {
+			fmt.Printf("\n%-12s %s\n", parser.FormatBytes(ds.Size), relPath)
+		} else {
+			fmt.Printf("%-12s %s\n", parser.FormatBytes(ds.Size), relPath)
+		}
 	}
 }
